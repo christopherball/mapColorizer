@@ -2,6 +2,8 @@
 
 Lightweight static single-page web app for coloring U.S. states or counties from a local CSV.
 
+![Sample Map](sampleMap.png)
+
 The app is fully client-side:
 - no backend
 - no login
