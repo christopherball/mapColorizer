@@ -44,6 +44,8 @@ The app uses a projection-aware SVG renderer instead of Leaflet. That keeps the 
   UI orchestration, file loading, tooltips, modal dialogs, legend, and details panel.
 - `./mapColorizer/scripts/build-projected-census-boundaries.mjs`
   Regenerates the lighter projected Census boundary assets used by county mode and refreshes the county FIPS reference CSV.
+- `./mapColorizer/scripts/build-dist.mjs`
+  Builds a clean `./mapColorizer/dist/` folder containing the deployable static app.
 
 That keeps the app easy to extend later if city support is added.
 
@@ -72,6 +74,7 @@ That keeps the app easy to extend later if city support is added.
 │   ├── example-counties.csv
 │   └── example-states.csv
 ├── scripts/
+│   ├── build-dist.mjs
 │   └── build-projected-census-boundaries.mjs
 └── js/
     ├── boundaries.js
@@ -80,6 +83,12 @@ That keeps the app easy to extend later if city support is added.
     ├── constants.js
     ├── csv.js
     └── mapRenderer.js
+```
+
+Generated when needed:
+
+```text
+./mapColorizer/dist/
 ```
 
 State mode currently uses `states-albers-10m.json`. County mode uses the generated `*-census-2024-5m-projected.geojson` files at runtime. The raw `*-census-2024-5m.geojson` files are retained as local source inputs, and the older `*-albers-10m.json` files are retained as legacy assets.
@@ -98,6 +107,46 @@ Then open:
 ```text
 http://127.0.0.1:8000/
 ```
+
+## Build a deployable dist bundle
+
+When you want a fresh folder to copy to your web server:
+
+```bash
+cd ./mapColorizer
+node scripts/build-dist.mjs
+```
+
+That rebuilds `./mapColorizer/dist/` from scratch and copies only the files the deployed app needs:
+
+- HTML, CSS, and JavaScript
+- vendored runtime libraries
+- bundled sample CSVs
+- the county FIPS reference CSV
+- the runtime boundary files actually used by the app
+
+If you changed the raw Census boundary inputs or the boundary-generation logic first, regenerate the projected runtime assets before building `dist`:
+
+```bash
+cd ./mapColorizer
+node scripts/build-projected-census-boundaries.mjs
+node scripts/build-dist.mjs
+```
+
+You can test the generated bundle locally too:
+
+```bash
+cd ./mapColorizer
+python3 -m http.server 8000 --directory dist
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8000/
+```
+
+`dist/` is generated output and should not be committed to git.
 
 ## Basic workflow
 
@@ -202,6 +251,7 @@ It reflects current county-equivalent geography from the bundled projected Censu
 
 - The inset-style map is intentionally not scale-accurate. Alaska and Hawaii are repositioned for readability.
 - Runtime dependencies are vendored locally, so the app does not need third-party network requests once `./mapColorizer` is on disk.
+- The `dist/` folder is a straight static copy step, not a bundler/transpiler pipeline, so rebuilding it is fast and easy to inspect.
 - The repo is larger because it includes local copies of D3, Papa Parse, TopoJSON client, and local Census boundary files.
 - The runtime map uses Census generalized 2024 boundary files rather than the heaviest full-detail TIGER/Line layers. That keeps county mode more practical in-browser while still covering Connecticut planning regions and Alaska's current split.
 - Dependency updates are manual. Replace files in `./mapColorizer/vendor/` and `./mapColorizer/data/boundaries/` when you want newer versions.
