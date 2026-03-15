@@ -245,6 +245,8 @@ It reflects current county-equivalent geography from the bundled projected Censu
 - Numeric coloring uses a single-hue teal ramp.
 - `Visual Isolation` fades unmatched regions without changing matched ones.
 - In numeric mode, red outlines indicate matched regions that are missing one or more selected numeric fields.
+- The details pane supports persistent sorting by field or value.
+- Numeric values in the details pane are shaded using the same single-column bucket colors they would receive on the map.
 - Categorical colors are assigned deterministically so category colors do not change just because CSV row order changes.
 
 ## Tradeoffs and fragile areas
