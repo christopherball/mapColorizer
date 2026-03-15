@@ -28,20 +28,22 @@ The app is fully client-side:
 
 ## Architecture
 
-The app uses a projected SVG renderer instead of Leaflet. That keeps the familiar inset-style U.S. map for Alaska and Hawaii simple and predictable, while staying lightweight and easy to inspect.
+The app uses a projection-aware SVG renderer instead of Leaflet. That keeps the familiar inset-style U.S. map for Alaska and Hawaii simple and predictable, while staying lightweight and easy to inspect.
 
 - `./mapColorizer/js/config.js`
-  Central geography rules, projected boundary URLs, example-file paths, and map defaults.
+  Central geography rules, boundary-source URLs, example-file paths, and map defaults.
 - `./mapColorizer/js/csv.js`
   CSV parsing, normalization, numeric/categorical column detection, and join-key bookkeeping.
 - `./mapColorizer/js/coloring.js`
   Numeric bucket coloring, categorical coloring, legend generation, and tooltip value logic.
 - `./mapColorizer/js/boundaries.js`
-  Projected boundary loading and caching.
+  Boundary loading, normalization, and caching for the local map files.
 - `./mapColorizer/js/mapRenderer.js`
-  D3/SVG map drawing plus pan/zoom behavior.
+  D3/SVG map drawing plus pan/zoom behavior, including the inset-style U.S. projection.
 - `./mapColorizer/app.js`
   UI orchestration, file loading, tooltips, modal dialogs, legend, and details panel.
+- `./mapColorizer/scripts/build-projected-census-boundaries.mjs`
+  Regenerates the lighter projected Census boundary assets used by county mode and refreshes the county FIPS reference CSV.
 
 That keeps the app easy to extend later if city support is added.
 
@@ -60,11 +62,17 @@ That keeps the app easy to extend later if city support is added.
 ├── data/
 │   ├── boundaries/
 │   │   ├── counties-albers-10m.json
-│   │   └── states-albers-10m.json
+│   │   ├── counties-census-2024-5m.geojson
+│   │   ├── counties-census-2024-5m-projected.geojson
+│   │   ├── states-albers-10m.json
+│   │   ├── states-census-2024-5m.geojson
+│   │   └── states-census-2024-5m-projected.geojson
 │   ├── reference/
 │   │   └── us-counties-fips.csv
 │   ├── example-counties.csv
 │   └── example-states.csv
+├── scripts/
+│   └── build-projected-census-boundaries.mjs
 └── js/
     ├── boundaries.js
     ├── coloring.js
@@ -73,6 +81,8 @@ That keeps the app easy to extend later if city support is added.
     ├── csv.js
     └── mapRenderer.js
 ```
+
+State mode currently uses `states-albers-10m.json`. County mode uses the generated `*-census-2024-5m-projected.geojson` files at runtime. The raw `*-census-2024-5m.geojson` files are retained as local source inputs, and the older `*-albers-10m.json` files are retained as legacy assets.
 
 ## Run locally
 
@@ -118,7 +128,7 @@ NV,Nevada,73,65,71,Hot-dry,Shortlist
 ### County mode
 
 - Required join key: `fips`
-- Exact join rule: 5-digit county FIPS code
+- Exact join rule: 5-digit county-equivalent FIPS code
 - County names are display-only and are not used for matching
 
 Example:
@@ -172,10 +182,16 @@ Columns included:
 
 This file was generated from the same local county boundary data the app uses, so its county FIPS values line up with the map.
 
+It reflects current county-equivalent geography from the bundled projected Census boundary file, including:
+
+- Connecticut's 9 planning regions
+- Alaska's `Chugach Census Area (02063)` and `Copper River Census Area (02066)`
+
 ## Current UI notes
 
 - The map uses a dark mode color scheme.
 - Alaska and Hawaii are shown in the familiar inset-style U.S. layout.
+- County mode uses current county-equivalent boundaries, so Connecticut planning regions and Alaska's current county-equivalent split are represented correctly.
 - `About` and `Sample Data` use the same reusable modal path.
 - Numeric coloring uses a single-hue teal ramp.
 - `Visual Isolation` fades unmatched regions without changing matched ones.
@@ -186,7 +202,8 @@ This file was generated from the same local county boundary data the app uses, s
 
 - The inset-style map is intentionally not scale-accurate. Alaska and Hawaii are repositioned for readability.
 - Runtime dependencies are vendored locally, so the app does not need third-party network requests once `./mapColorizer` is on disk.
-- The repo is larger because it includes local copies of D3, Papa Parse, TopoJSON client, and projected `us-atlas` boundary files.
+- The repo is larger because it includes local copies of D3, Papa Parse, TopoJSON client, and local Census boundary files.
+- The runtime map uses Census generalized 2024 boundary files rather than the heaviest full-detail TIGER/Line layers. That keeps county mode more practical in-browser while still covering Connecticut planning regions and Alaska's current split.
 - Dependency updates are manual. Replace files in `./mapColorizer/vendor/` and `./mapColorizer/data/boundaries/` when you want newer versions.
 - Duplicate join keys are not aggregated. The last CSV row for a repeated `state_abbr` or `fips` wins.
 - County rendering is heavier than state rendering because it draws far more polygons.
