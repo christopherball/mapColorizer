@@ -18,6 +18,7 @@ const copyEntries = [
   "data/example-states.csv",
   "data/example-counties.csv",
   "data/reference/us-counties-fips.csv",
+  "data/overlays/us-scheduled-airports.json",
   "data/boundaries/states-albers-10m.json",
   "data/boundaries/counties-census-2024-5m-projected.geojson",
   "data/boundaries/states-census-2024-5m-projected.geojson",

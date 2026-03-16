@@ -29,6 +29,7 @@ export function createMapRenderer({
   const nationLayer = zoomRoot.append("g").attr("class", "nation-layer");
   const regionLayer = zoomRoot.append("g").attr("class", "region-layer");
   const overlayLayer = zoomRoot.append("g").attr("class", "overlay-layer");
+  const airportLayer = zoomRoot.append("g").attr("class", "airport-layer");
 
   const zoom = d3
     .zoom()
@@ -40,6 +41,7 @@ export function createMapRenderer({
       }
 
       zoomRoot.attr("transform", event.transform);
+      updateAirportMarkerScale();
     });
 
   svg.call(zoom).on("dblclick.zoom", null);
@@ -62,6 +64,7 @@ export function createMapRenderer({
     unmatchedOpacity: APP_CONFIG.map.unmatchedOpacity,
     unmatchedStrokeOpacity: APP_CONFIG.map.unmatchedStrokeOpacity,
     hiddenNumericBucketCount: 0,
+    airportOverlay: emptyAirportOverlay(),
   };
 
   let regionsSelection = regionLayer.selectAll("path.map-region");
@@ -77,6 +80,7 @@ export function createMapRenderer({
     unmatchedOpacity,
     unmatchedStrokeOpacity,
     hiddenNumericBucketCount,
+    airportOverlay,
   }) {
     state.levelConfig = levelConfig;
     state.joinLookup = joinLookup;
@@ -86,10 +90,12 @@ export function createMapRenderer({
     state.unmatchedOpacity = unmatchedOpacity ?? APP_CONFIG.map.unmatchedOpacity;
     state.unmatchedStrokeOpacity = unmatchedStrokeOpacity ?? APP_CONFIG.map.unmatchedStrokeOpacity;
     state.hiddenNumericBucketCount = hiddenNumericBucketCount || 0;
+    state.airportOverlay = airportOverlay || emptyAirportOverlay();
     path = buildPath(boundaryData);
 
     nationLayer.selectAll("*").remove();
     overlayLayer.selectAll("*").remove();
+    airportLayer.selectAll("*").remove();
 
     if (boundaryData.drawNation !== false) {
       nationLayer
@@ -153,6 +159,8 @@ export function createMapRenderer({
         .attr("d", path)
         .attr("pointer-events", "none");
     }
+
+    renderAirportOverlay();
 
     if (shouldResetView) {
       resetView({ animated: false });
@@ -287,14 +295,21 @@ export function createMapRenderer({
     applyRegionStyles();
   }
 
+  function setAirportOverlay(airportOverlay) {
+    state.airportOverlay = airportOverlay || emptyAirportOverlay();
+    renderAirportOverlay();
+  }
+
   function clear() {
     nationLayer.selectAll("*").remove();
     regionLayer.selectAll("*").remove();
     overlayLayer.selectAll("*").remove();
+    airportLayer.selectAll("*").remove();
     regionsSelection = regionLayer.selectAll("path.map-region");
     state.currentTransform = d3.zoomIdentity;
     state.selectedKey = "";
     state.fitTransform = d3.zoomIdentity;
+    state.airportOverlay = emptyAirportOverlay();
     onFeatureLeave?.();
     resetView({ animated: false });
   }
@@ -337,6 +352,124 @@ export function createMapRenderer({
     return d3.geoPath();
   }
 
+  function renderAirportOverlay() {
+    airportLayer.selectAll("*").remove();
+
+    const overlay = state.airportOverlay;
+    if (!overlay?.enabled || !overlay.airports?.length) {
+      return;
+    }
+
+    if (overlay.ringsEnabled && overlay.radiusMiles > 0 && overlay.projection) {
+      const ringLayer = airportLayer.append("g").attr("class", "airport-ring-layer").attr("pointer-events", "none");
+      const ringPath = buildAirportRingPathGenerator(overlay.projection, overlay.radiusMiles);
+      const ringEntries = overlay.airports
+        .map((airport) => ({
+          airport,
+          path: ringPath(airport),
+        }))
+        .filter((entry) => entry.path);
+
+      ringLayer
+        .selectAll("path.airport-ring-outline")
+        .data(ringEntries, (entry) => entry.airport.id)
+        .enter()
+        .append("path")
+        .attr("class", "airport-ring-outline")
+        .attr("d", (entry) => entry.path)
+        .attr("pointer-events", "none");
+
+      ringLayer
+        .selectAll("path.airport-ring")
+        .data(ringEntries, (entry) => entry.airport.id)
+        .enter()
+        .append("path")
+        .attr("class", "airport-ring")
+        .attr("d", (entry) => entry.path)
+        .attr("pointer-events", "none");
+    }
+
+    const markerLayer = airportLayer.append("g").attr("class", "airport-marker-layer").attr("pointer-events", "none");
+    const markers = markerLayer
+      .selectAll("g.airport-marker")
+      .data(overlay.airports, (airport) => airport.id)
+      .enter()
+      .append("g")
+      .attr("class", "airport-marker")
+      .classed("is-large", (airport) => getAirportTier(airport) === "large")
+      .classed("is-medium", (airport) => getAirportTier(airport) === "medium")
+      .classed("is-other", (airport) => getAirportTier(airport) === "other")
+      .attr("pointer-events", "none");
+
+    markers.append("path").attr("class", "airport-marker-arm").attr("d", "M-4,0 H4 M0,-4 V4");
+    markers.append("circle").attr("class", "airport-marker-core").attr("r", 2.6);
+    updateAirportMarkerScale();
+  }
+
+  function buildAirportRingPathGenerator(projectionMeta, radiusMiles) {
+    const projectPoint = createAirportProjector(projectionMeta);
+    const line = d3.line().curve(d3.curveLinearClosed);
+    const angularRadiusDegrees = milesToDegrees(radiusMiles);
+
+    return (airport) => {
+      const ringGeometry = d3.geoCircle().center([airport.longitude, airport.latitude]).radius(angularRadiusDegrees)();
+      const projectedPoints = ringGeometry.coordinates[0].map(projectPoint).filter(Boolean);
+      return projectedPoints.length ? line(projectedPoints) : null;
+    };
+  }
+
+  function createAirportProjector(projectionMeta) {
+    const projection = d3
+      .geoAlbersUsa()
+      .scale(projectionMeta.albersUsaScale)
+      .translate(projectionMeta.albersUsaTranslate);
+
+    return (coordinates) => {
+      const projected = projection(coordinates);
+      if (!projected) {
+        return null;
+      }
+
+      return [
+        projected[0] * projectionMeta.alignScaleX + projectionMeta.alignTranslateX,
+        projected[1] * projectionMeta.alignScaleY + projectionMeta.alignTranslateY,
+      ];
+    };
+  }
+
+  function milesToDegrees(miles) {
+    return (miles / 3958.7613) * (180 / Math.PI);
+  }
+
+  function updateAirportMarkerScale() {
+    const inverseScale = state.currentTransform?.k ? 1 / state.currentTransform.k : 1;
+    airportLayer
+      .selectAll("g.airport-marker")
+      .attr("transform", (airport) => `translate(${airport.x},${airport.y}) scale(${inverseScale})`);
+  }
+
+  function getAirportTier(airport) {
+    if (airport?.type === "large_airport") {
+      return "large";
+    }
+
+    if (airport?.type === "medium_airport") {
+      return "medium";
+    }
+
+    return "other";
+  }
+
+  function emptyAirportOverlay() {
+    return {
+      enabled: false,
+      ringsEnabled: false,
+      radiusMiles: 0,
+      projection: null,
+      airports: [],
+    };
+  }
+
   function transformsEqual(left, right) {
     return left?.x === right?.x && left?.y === right?.y && left?.k === right?.k;
   }
@@ -347,6 +480,7 @@ export function createMapRenderer({
     setUnmatchedOpacity,
     setUnmatchedStrokeOpacity,
     setHiddenNumericBucketCount,
+    setAirportOverlay,
     clear,
     resetView,
   };

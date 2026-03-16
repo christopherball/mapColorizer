@@ -1,4 +1,5 @@
 import { loadBoundaryData } from "./js/boundaries.js";
+import { loadAirportOverlayData } from "./js/airports.js";
 import { buildColorizer } from "./js/coloring.js";
 import { APP_CONFIG } from "./js/config.js";
 import { NUMERIC_PALETTE, STATE_ABBR_BY_FIPS, STATE_ABBR_BY_NAME } from "./js/constants.js";
@@ -18,6 +19,11 @@ const els = {
   numericColumnList: document.getElementById("numericColumnList"),
   categoricalColumnControl: document.getElementById("categoricalColumnControl"),
   categoricalColumnSelect: document.getElementById("categoricalColumnSelect"),
+  showLargeAirportsToggle: document.getElementById("showLargeAirportsToggle"),
+  showMediumAirportsToggle: document.getElementById("showMediumAirportsToggle"),
+  showOtherAirportsToggle: document.getElementById("showOtherAirportsToggle"),
+  showAirportRingsToggle: document.getElementById("showAirportRingsToggle"),
+  airportRadiusMilesInput: document.getElementById("airportRadiusMilesInput"),
   visualIsolationRange: document.getElementById("visualIsolationRange"),
   visualIsolationValue: document.getElementById("visualIsolationValue"),
   visualIsolationHelp: document.getElementById("visualIsolationHelp"),
@@ -54,6 +60,12 @@ const appState = {
   numericColumnSelections: [""],
   unmatchedIsolation: 0,
   numericIsolationLevel: 1,
+  showLargeAirports: false,
+  showMediumAirports: false,
+  showOtherAirports: false,
+  showAirportRings: false,
+  airportRadiusMiles: APP_CONFIG.airports.defaultRadiusMiles,
+  airportOverlayData: null,
 };
 
 init();
@@ -75,6 +87,7 @@ function init() {
   renderNumericColumnControls();
   syncColorControlVisibility();
   syncVisualIsolationControl();
+  syncAirportControls();
   updateSampleLink();
   renderLegendPlaceholder("Load a CSV to populate the map.");
   renderDetailsPlaceholder();
@@ -192,6 +205,48 @@ function bindEvents() {
     renderCurrentView().catch(handleError);
   });
 
+  els.showLargeAirportsToggle.addEventListener("change", () => {
+    appState.showLargeAirports = els.showLargeAirportsToggle.checked;
+    if (!hasVisibleAirportClasses()) {
+      appState.showAirportRings = false;
+    }
+
+    syncAirportControls();
+    updateAirportOverlay().catch(handleError);
+  });
+
+  els.showMediumAirportsToggle.addEventListener("change", () => {
+    appState.showMediumAirports = els.showMediumAirportsToggle.checked;
+    if (!hasVisibleAirportClasses()) {
+      appState.showAirportRings = false;
+    }
+
+    syncAirportControls();
+    updateAirportOverlay().catch(handleError);
+  });
+
+  els.showOtherAirportsToggle.addEventListener("change", () => {
+    appState.showOtherAirports = els.showOtherAirportsToggle.checked;
+    if (!hasVisibleAirportClasses()) {
+      appState.showAirportRings = false;
+    }
+
+    syncAirportControls();
+    updateAirportOverlay().catch(handleError);
+  });
+
+  els.showAirportRingsToggle.addEventListener("change", () => {
+    appState.showAirportRings = els.showAirportRingsToggle.checked;
+    syncAirportControls();
+    updateAirportOverlay().catch(handleError);
+  });
+
+  els.airportRadiusMilesInput.addEventListener("input", () => {
+    appState.airportRadiusMiles = normalizeAirportRadiusMiles(els.airportRadiusMilesInput.value);
+    syncAirportControls();
+    updateAirportOverlay().catch(handleError);
+  });
+
   els.visualIsolationRange.addEventListener("input", (event) => {
     const rawValue = Number(event.target.value);
 
@@ -300,6 +355,27 @@ function syncColorControlVisibility() {
   els.categoricalColumnControl.hidden = isNumeric;
 }
 
+function syncAirportControls() {
+  els.showLargeAirportsToggle.checked = appState.showLargeAirports;
+  els.showMediumAirportsToggle.checked = appState.showMediumAirports;
+  els.showOtherAirportsToggle.checked = appState.showOtherAirports;
+  els.showAirportRingsToggle.checked = appState.showAirportRings;
+  els.showAirportRingsToggle.disabled = !hasVisibleAirportClasses();
+  els.airportRadiusMilesInput.value = String(appState.airportRadiusMiles);
+  els.airportRadiusMilesInput.disabled = !hasVisibleAirportClasses() || !appState.showAirportRings;
+}
+
+function normalizeAirportRadiusMiles(value) {
+  const parsed = Number(value);
+  const fallback = APP_CONFIG.airports.defaultRadiusMiles;
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  const bounded = Math.max(APP_CONFIG.airports.minRadiusMiles, Math.min(APP_CONFIG.airports.maxRadiusMiles, parsed));
+  return Math.round(bounded / APP_CONFIG.airports.radiusStepMiles) * APP_CONFIG.airports.radiusStepMiles;
+}
+
 function syncVisualIsolationControl() {
   if (isNumericIsolationMode()) {
     const level = normalizeNumericIsolationLevel(appState.numericIsolationLevel);
@@ -359,6 +435,64 @@ function getHiddenNumericBucketCount() {
   }
 
   return Math.max(0, normalizeNumericIsolationLevel(appState.numericIsolationLevel) - 1);
+}
+
+async function getCurrentAirportOverlay() {
+  if (!hasVisibleAirportClasses()) {
+    return {
+      enabled: false,
+      ringsEnabled: false,
+      radiusMiles: appState.airportRadiusMiles,
+      projection: null,
+      airports: [],
+    };
+  }
+
+  if (!appState.airportOverlayData) {
+    appState.airportOverlayData = await loadAirportOverlayData(APP_CONFIG.airports.url);
+  }
+
+  const airports = appState.airportOverlayData.airports.filter((airport) => {
+    const tier = getAirportTier(airport.type);
+    return (
+      (tier === "large" && appState.showLargeAirports) ||
+      (tier === "medium" && appState.showMediumAirports) ||
+      (tier === "other" && appState.showOtherAirports)
+    );
+  });
+
+  return {
+    enabled: airports.length > 0,
+    ringsEnabled: appState.showAirportRings && airports.length > 0,
+    radiusMiles: appState.airportRadiusMiles,
+    projection: appState.airportOverlayData.projection,
+    airports,
+  };
+}
+
+async function updateAirportOverlay() {
+  if (!appState.renderer) {
+    return;
+  }
+
+  const airportOverlay = await getCurrentAirportOverlay();
+  appState.renderer.setAirportOverlay(airportOverlay);
+}
+
+function hasVisibleAirportClasses() {
+  return appState.showLargeAirports || appState.showMediumAirports || appState.showOtherAirports;
+}
+
+function getAirportTier(type) {
+  if (type === "large_airport") {
+    return "large";
+  }
+
+  if (type === "medium_airport") {
+    return "medium";
+  }
+
+  return "other";
 }
 
 async function loadDataset(rawRows, label, { forceResetView = false } = {}) {
@@ -570,6 +704,7 @@ async function renderCurrentView({ forceResetView = false } = {}) {
   clearSelection();
   renderDetailsPlaceholder();
   hideTooltip();
+  const airportOverlay = await getCurrentAirportOverlay();
 
   setStatus(`Loading ${levelConfig.label.toLowerCase()} boundaries...`);
   const boundaryData = await loadBoundaryData(levelConfig);
@@ -584,6 +719,7 @@ async function renderCurrentView({ forceResetView = false } = {}) {
     unmatchedOpacity,
     unmatchedStrokeOpacity,
     hiddenNumericBucketCount: getHiddenNumericBucketCount(),
+    airportOverlay,
   });
 
   appState.lastRenderedLevel = levelConfig.id;
@@ -613,6 +749,7 @@ async function renderBaseMap({ forceResetView = false } = {}) {
   appState.currentColorizer = null;
   appState.detailNumericColorizers = new Map();
   syncVisualIsolationControl();
+  const airportOverlay = await getCurrentAirportOverlay();
 
   appState.renderer.render({
     levelConfig,
@@ -629,6 +766,7 @@ async function renderBaseMap({ forceResetView = false } = {}) {
     unmatchedOpacity: APP_CONFIG.map.unmatchedOpacity,
     unmatchedStrokeOpacity: APP_CONFIG.map.unmatchedStrokeOpacity,
     hiddenNumericBucketCount: 0,
+    airportOverlay,
   });
 
   appState.lastRenderedLevel = levelConfig.id;

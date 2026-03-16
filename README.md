@@ -22,6 +22,8 @@ The app is fully client-side:
 - Adjust a `Visual Isolation` slider that:
   - in `Numeric` mode, progressively mutes the lowest legend buckets
   - in `Categorical` mode, fades unmatched regions
+- Toggle a bundled airport overlay on and off
+- Show optional airport distance rings with a configurable radius in miles
 - Flag numeric rows with missing selected values using warning outlines and tooltip warnings
 - Show a legend
 - Show hover tooltips
@@ -40,12 +42,16 @@ The app uses a projection-aware SVG renderer instead of Leaflet. That keeps the 
   Numeric bucket coloring, categorical coloring, legend generation, and tooltip value logic.
 - `./mapColorizer/js/boundaries.js`
   Boundary loading, normalization, and caching for the local map files.
+- `./mapColorizer/js/airports.js`
+  Airport overlay loading and caching for the local airport data file.
 - `./mapColorizer/js/mapRenderer.js`
-  D3/SVG map drawing plus pan/zoom behavior, including the inset-style U.S. projection.
+  D3/SVG map drawing plus pan/zoom behavior, including the inset-style U.S. projection and airport overlays.
 - `./mapColorizer/app.js`
   UI orchestration, file loading, tooltips, modal dialogs, legend, and details panel.
 - `./mapColorizer/scripts/build-projected-census-boundaries.mjs`
   Regenerates the lighter projected Census boundary assets used by county mode and refreshes the county FIPS reference CSV.
+- `./mapColorizer/scripts/build-airport-overlay.mjs`
+  Filters and projects the bundled airport source CSV into the local runtime airport overlay JSON.
 - `./mapColorizer/scripts/build-dist.mjs`
   Builds a clean `./mapColorizer/dist/` folder containing the deployable static app.
 
@@ -71,14 +77,20 @@ That keeps the app easy to extend later if city support is added.
 │   │   ├── states-albers-10m.json
 │   │   ├── states-census-2024-5m.geojson
 │   │   └── states-census-2024-5m-projected.geojson
+│   ├── overlays/
+│   │   └── us-scheduled-airports.json
 │   ├── reference/
 │   │   └── us-counties-fips.csv
+│   ├── source/
+│   │   └── ourairports-airports.csv
 │   ├── example-counties.csv
 │   └── example-states.csv
 ├── scripts/
+│   ├── build-airport-overlay.mjs
 │   ├── build-dist.mjs
 │   └── build-projected-census-boundaries.mjs
 └── js/
+    ├── airports.js
     ├── boundaries.js
     ├── coloring.js
     ├── config.js
@@ -124,14 +136,16 @@ That rebuilds `./mapColorizer/dist/` from scratch and copies only the files the 
 - HTML, CSS, and JavaScript
 - vendored runtime libraries
 - bundled sample CSVs
+- the bundled airport overlay data
 - the county FIPS reference CSV
 - the runtime boundary files actually used by the app
 
-If you changed the raw Census boundary inputs or the boundary-generation logic first, regenerate the projected runtime assets before building `dist`:
+If you changed the raw Census boundary inputs, the airport source CSV, or the related build logic first, regenerate the derived runtime assets before building `dist`:
 
 ```bash
 cd ./mapColorizer
 node scripts/build-projected-census-boundaries.mjs
+node scripts/build-airport-overlay.mjs
 node scripts/build-dist.mjs
 ```
 
@@ -158,7 +172,7 @@ http://127.0.0.1:8000/
 4. Upload your CSV or load a sample CSV.
 5. Pick `Numeric` or `Categorical` color mode.
 6. If using `Numeric`, choose one or more numeric columns. Multiple numeric columns are summed before bucket coloring.
-7. Use `Visual Isolation` to fade regions that do not have matching CSV rows.
+7. Use `Visual Isolation` to either mute lower numeric buckets or fade unmatched categorical regions, depending on color mode.
 8. Hover regions for a tooltip and click a region for the full row details.
 
 ## CSV join rules
@@ -243,6 +257,10 @@ It reflects current county-equivalent geography from the bundled projected Censu
 - The map uses a dark mode color scheme.
 - Alaska and Hawaii are shown in the familiar inset-style U.S. layout.
 - County mode uses current county-equivalent boundaries, so Connecticut planning regions and Alaska's current county-equivalent split are represented correctly.
+- Large, medium, and other airports can be toggled independently of the CSV overlay.
+- Airport rings are approximate radial distance guides in miles around each bundled airport marker.
+- Airport icons stay a fixed on-screen size while zooming; `large_airport`, `medium_airport`, and all other scheduled-service airport types are shown as separate overlay tiers.
+- Airport rings are stroke-only so overlapping rings do not wash out the map coloring underneath.
 - `About` and `Sample Data` use the same reusable modal path.
 - Numeric coloring uses a single-hue teal ramp with five equal-width bins across the active field range.
 - In `Numeric` mode, `Visual Isolation` snaps across the five legend buckets and, as you drag right, progressively mutes lower buckets from darkest to lightest.
@@ -257,7 +275,7 @@ It reflects current county-equivalent geography from the bundled projected Censu
 - The inset-style map is intentionally not scale-accurate. Alaska and Hawaii are repositioned for readability.
 - Runtime dependencies are vendored locally, so the app does not need third-party network requests once `./mapColorizer` is on disk.
 - The `dist/` folder is a straight static copy step, not a bundler/transpiler pipeline, so rebuilding it is fast and easy to inspect.
-- The repo is larger because it includes local copies of D3, Papa Parse, TopoJSON client, and local Census boundary files.
+- The repo is larger because it includes local copies of D3, Papa Parse, TopoJSON client, local Census boundary files, and a bundled airport source/overlay dataset.
 - The runtime map uses Census generalized 2024 boundary files rather than the heaviest full-detail TIGER/Line layers. That keeps county mode more practical in-browser while still covering Connecticut planning regions and Alaska's current split.
 - Dependency updates are manual. Replace files in `./mapColorizer/vendor/` and `./mapColorizer/data/boundaries/` when you want newer versions.
 - Duplicate join keys are not aggregated. The last CSV row for a repeated `state_abbr` or `fips` wins.
