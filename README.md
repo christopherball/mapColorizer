@@ -1,6 +1,6 @@
 # Map Colorizer
 
-Lightweight static single-page web app for coloring U.S. states or counties from a local CSV.
+Lightweight choropleth map app for coloring U.S. states and counties using local CSV data.
 
 ![Sample Map](sampleMap.png)
 
