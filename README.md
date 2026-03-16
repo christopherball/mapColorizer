@@ -19,7 +19,9 @@ The app is fully client-side:
   - `Numeric`
   - `Categorical`
 - Stack multiple numeric columns and color by their summed total
-- Adjust a `Visual Isolation` slider to fade unmatched regions
+- Adjust a `Visual Isolation` slider that:
+  - in `Numeric` mode, progressively mutes the lowest legend buckets
+  - in `Categorical` mode, fades unmatched regions
 - Flag numeric rows with missing selected values using warning outlines and tooltip warnings
 - Show a legend
 - Show hover tooltips
@@ -242,8 +244,9 @@ It reflects current county-equivalent geography from the bundled projected Censu
 - Alaska and Hawaii are shown in the familiar inset-style U.S. layout.
 - County mode uses current county-equivalent boundaries, so Connecticut planning regions and Alaska's current county-equivalent split are represented correctly.
 - `About` and `Sample Data` use the same reusable modal path.
-- Numeric coloring uses a single-hue teal ramp.
-- `Visual Isolation` fades unmatched regions without changing matched ones.
+- Numeric coloring uses a single-hue teal ramp with five equal-width bins across the active field range.
+- In `Numeric` mode, `Visual Isolation` snaps across the five legend buckets and, as you drag right, progressively mutes lower buckets from darkest to lightest.
+- In `Categorical` mode, `Visual Isolation` fades unmatched regions without changing matched ones.
 - In numeric mode, red outlines indicate matched regions that are missing one or more selected numeric fields.
 - The details pane supports persistent sorting by field or value.
 - Numeric values in the details pane are shaded using the same single-column bucket colors they would receive on the map.

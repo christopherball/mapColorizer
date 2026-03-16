@@ -1,7 +1,7 @@
 import { loadBoundaryData } from "./js/boundaries.js";
 import { buildColorizer } from "./js/coloring.js";
 import { APP_CONFIG } from "./js/config.js";
-import { STATE_ABBR_BY_FIPS, STATE_ABBR_BY_NAME } from "./js/constants.js";
+import { NUMERIC_PALETTE, STATE_ABBR_BY_FIPS, STATE_ABBR_BY_NAME } from "./js/constants.js";
 import { buildJoinStats, createDataset, parseCsvText } from "./js/csv.js";
 import { createMapRenderer } from "./js/mapRenderer.js";
 
@@ -20,6 +20,7 @@ const els = {
   categoricalColumnSelect: document.getElementById("categoricalColumnSelect"),
   visualIsolationRange: document.getElementById("visualIsolationRange"),
   visualIsolationValue: document.getElementById("visualIsolationValue"),
+  visualIsolationHelp: document.getElementById("visualIsolationHelp"),
   legend: document.getElementById("legend"),
   details: document.getElementById("details"),
   statusBar: document.getElementById("statusBar"),
@@ -51,7 +52,8 @@ const appState = {
   lastRenderedLevel: "",
   sampleTextCache: new Map(),
   numericColumnSelections: [""],
-  visualIsolation: 0,
+  unmatchedIsolation: 0,
+  numericIsolationLevel: 1,
 };
 
 init();
@@ -191,10 +193,22 @@ function bindEvents() {
   });
 
   els.visualIsolationRange.addEventListener("input", (event) => {
-    appState.visualIsolation = Number(event.target.value) || 0;
+    const rawValue = Number(event.target.value);
+
+    if (isNumericIsolationMode()) {
+      appState.numericIsolationLevel = normalizeNumericIsolationLevel(rawValue);
+    } else {
+      appState.unmatchedIsolation = rawValue || 0;
+    }
+
     syncVisualIsolationControl();
 
     if (!appState.dataset) {
+      return;
+    }
+
+    if (isNumericIsolationMode()) {
+      appState.renderer.setHiddenNumericBucketCount(getHiddenNumericBucketCount());
       return;
     }
 
@@ -287,23 +301,64 @@ function syncColorControlVisibility() {
 }
 
 function syncVisualIsolationControl() {
-  els.visualIsolationRange.value = String(appState.visualIsolation);
-  els.visualIsolationValue.textContent = `${appState.visualIsolation}%`;
+  if (isNumericIsolationMode()) {
+    const level = normalizeNumericIsolationLevel(appState.numericIsolationLevel);
+    const visibleBucketCount = NUMERIC_PALETTE.length - (level - 1);
+    els.visualIsolationRange.min = "1";
+    els.visualIsolationRange.max = String(NUMERIC_PALETTE.length);
+    els.visualIsolationRange.step = "1";
+    els.visualIsolationRange.value = String(level);
+    els.visualIsolationValue.textContent = `${visibleBucketCount} of ${NUMERIC_PALETTE.length}`;
+    els.visualIsolationHelp.textContent = "Mute lower numeric buckets from darkest to lightest.";
+  } else {
+    els.visualIsolationRange.min = "0";
+    els.visualIsolationRange.max = "100";
+    els.visualIsolationRange.step = "1";
+    els.visualIsolationRange.value = String(appState.unmatchedIsolation);
+    els.visualIsolationValue.textContent = `${appState.unmatchedIsolation}%`;
+    els.visualIsolationHelp.textContent = "Fade unimpacted regions.";
+  }
+
   els.visualIsolationRange.disabled = !appState.dataset;
 }
 
 function getCurrentUnmatchedOpacity() {
-  const ratio = appState.visualIsolation / 100;
+  if (isNumericIsolationMode()) {
+    return APP_CONFIG.map.unmatchedOpacity;
+  }
+
+  const ratio = appState.unmatchedIsolation / 100;
   const maxOpacity = APP_CONFIG.map.unmatchedOpacity;
   const minOpacity = APP_CONFIG.map.isolatedUnmatchedOpacity;
   return maxOpacity - (maxOpacity - minOpacity) * ratio;
 }
 
 function getCurrentUnmatchedStrokeOpacity() {
-  const ratio = appState.visualIsolation / 100;
+  if (isNumericIsolationMode()) {
+    return APP_CONFIG.map.unmatchedStrokeOpacity;
+  }
+
+  const ratio = appState.unmatchedIsolation / 100;
   const maxOpacity = APP_CONFIG.map.unmatchedStrokeOpacity;
   const minOpacity = APP_CONFIG.map.isolatedUnmatchedStrokeOpacity;
   return maxOpacity - (maxOpacity - minOpacity) * ratio;
+}
+
+function isNumericIsolationMode() {
+  return Boolean(appState.dataset) && els.colorModeSelect.value === "numeric";
+}
+
+function normalizeNumericIsolationLevel(value) {
+  const numericValue = Number.isFinite(value) ? value : NUMERIC_PALETTE.length;
+  return Math.max(1, Math.min(NUMERIC_PALETTE.length, Math.round(numericValue)));
+}
+
+function getHiddenNumericBucketCount() {
+  if (!isNumericIsolationMode()) {
+    return 0;
+  }
+
+  return Math.max(0, normalizeNumericIsolationLevel(appState.numericIsolationLevel) - 1);
 }
 
 async function loadDataset(rawRows, label, { forceResetView = false } = {}) {
@@ -510,6 +565,7 @@ async function renderCurrentView({ forceResetView = false } = {}) {
     emptyColor: APP_CONFIG.map.emptyValueFill,
   });
   appState.detailNumericColorizers = new Map();
+  syncVisualIsolationControl();
   renderLegend(appState.currentColorizer);
   clearSelection();
   renderDetailsPlaceholder();
@@ -527,6 +583,7 @@ async function renderCurrentView({ forceResetView = false } = {}) {
     shouldResetView: forceResetView,
     unmatchedOpacity,
     unmatchedStrokeOpacity,
+    hiddenNumericBucketCount: getHiddenNumericBucketCount(),
   });
 
   appState.lastRenderedLevel = levelConfig.id;
@@ -555,6 +612,7 @@ async function renderBaseMap({ forceResetView = false } = {}) {
   appState.currentJoinStats = null;
   appState.currentColorizer = null;
   appState.detailNumericColorizers = new Map();
+  syncVisualIsolationControl();
 
   appState.renderer.render({
     levelConfig,
@@ -570,6 +628,7 @@ async function renderBaseMap({ forceResetView = false } = {}) {
     shouldResetView: forceResetView,
     unmatchedOpacity: APP_CONFIG.map.unmatchedOpacity,
     unmatchedStrokeOpacity: APP_CONFIG.map.unmatchedStrokeOpacity,
+    hiddenNumericBucketCount: 0,
   });
 
   appState.lastRenderedLevel = levelConfig.id;

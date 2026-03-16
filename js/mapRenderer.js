@@ -61,6 +61,7 @@ export function createMapRenderer({
     fitTransform: d3.zoomIdentity,
     unmatchedOpacity: APP_CONFIG.map.unmatchedOpacity,
     unmatchedStrokeOpacity: APP_CONFIG.map.unmatchedStrokeOpacity,
+    hiddenNumericBucketCount: 0,
   };
 
   let regionsSelection = regionLayer.selectAll("path.map-region");
@@ -75,6 +76,7 @@ export function createMapRenderer({
     shouldResetView,
     unmatchedOpacity,
     unmatchedStrokeOpacity,
+    hiddenNumericBucketCount,
   }) {
     state.levelConfig = levelConfig;
     state.joinLookup = joinLookup;
@@ -83,6 +85,7 @@ export function createMapRenderer({
     state.selectedKey = selectedFeatureKey || "";
     state.unmatchedOpacity = unmatchedOpacity ?? APP_CONFIG.map.unmatchedOpacity;
     state.unmatchedStrokeOpacity = unmatchedStrokeOpacity ?? APP_CONFIG.map.unmatchedStrokeOpacity;
+    state.hiddenNumericBucketCount = hiddenNumericBucketCount || 0;
     path = buildPath(boundaryData);
 
     nationLayer.selectAll("*").remove();
@@ -171,7 +174,7 @@ export function createMapRenderer({
       .attr("fill", (feature) => {
         const featureKey = state.getFeatureKey(feature, state.levelConfig.id);
         const row = state.joinLookup.get(featureKey);
-        if (!row || isNumericRowWithoutRenderableValue(row)) {
+        if (!row || isNumericRowWithoutRenderableValue(row) || isHiddenByNumericIsolation(row)) {
           return APP_CONFIG.map.unmatchedFill;
         }
 
@@ -182,7 +185,7 @@ export function createMapRenderer({
       .attr("fill-opacity", (feature) => {
         const featureKey = state.getFeatureKey(feature, state.levelConfig.id);
         const row = state.joinLookup.get(featureKey);
-        if (!row || isNumericRowWithoutRenderableValue(row)) {
+        if (!row || isNumericRowWithoutRenderableValue(row) || isHiddenByNumericIsolation(row)) {
           return state.unmatchedOpacity;
         }
 
@@ -207,7 +210,10 @@ export function createMapRenderer({
           return 1;
         }
 
-        return state.joinLookup.has(featureKey) ? 1 : state.unmatchedStrokeOpacity;
+        const row = state.joinLookup.get(featureKey);
+        return row && !isNumericRowWithoutRenderableValue(row) && !isHiddenByNumericIsolation(row)
+          ? 1
+          : state.unmatchedStrokeOpacity;
       })
       .classed("is-warning", (feature) => {
         const featureKey = state.getFeatureKey(feature, state.levelConfig.id);
@@ -220,6 +226,15 @@ export function createMapRenderer({
 
   function isNumericRowWithoutRenderableValue(row) {
     return state.colorizer?.kind === "numeric" && !state.colorizer?.hasRenderableValue?.(row);
+  }
+
+  function isHiddenByNumericIsolation(row) {
+    if (state.colorizer?.kind !== "numeric" || !state.hiddenNumericBucketCount) {
+      return false;
+    }
+
+    const bucketIndex = state.colorizer?.getBucketIndex?.(row);
+    return Number.isInteger(bucketIndex) && bucketIndex >= 0 && bucketIndex < state.hiddenNumericBucketCount;
   }
 
   function handleHover(event, feature) {
@@ -264,6 +279,11 @@ export function createMapRenderer({
 
   function setUnmatchedStrokeOpacity(unmatchedStrokeOpacity) {
     state.unmatchedStrokeOpacity = unmatchedStrokeOpacity;
+    applyRegionStyles();
+  }
+
+  function setHiddenNumericBucketCount(hiddenNumericBucketCount) {
+    state.hiddenNumericBucketCount = hiddenNumericBucketCount || 0;
     applyRegionStyles();
   }
 
@@ -326,6 +346,7 @@ export function createMapRenderer({
     setSelectedKey,
     setUnmatchedOpacity,
     setUnmatchedStrokeOpacity,
+    setHiddenNumericBucketCount,
     clear,
     resetView,
   };
